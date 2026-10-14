@@ -3,16 +3,17 @@ package br.com.pixseguro.web;
 import br.com.pixseguro.domain.ConfirmacaoOutroCanal;
 import br.com.pixseguro.domain.ProximoPasso;
 import br.com.pixseguro.domain.Risco;
+import jakarta.validation.constraints.DecimalMin;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotNull;
 import jakarta.validation.constraints.Size;
+import java.math.BigDecimal;
 import java.time.Instant;
 import java.util.List;
 
 public final class Dtos {
 
-    private Dtos() {
-    }
+    private Dtos() {}
 
     public record ConsultaChaveRequest(@NotBlank @Size(max = 140) String chave) {}
 
@@ -41,4 +42,30 @@ public final class Dtos {
 
     public record DenunciaResponse(long totalDenunciasChave, Risco risco, boolean alertaPublicado,
                                    ProximoPasso proximoPasso, List<String> orientacoes) {}
+
+    /** Todos os campos descrevem uma tentativa fictícia; nunca representam uma ordem de pagamento real. */
+    public record PreflightPixRequest(
+            @NotNull @DecimalMin(value = "0.01", message = "O valor deve ser positivo") BigDecimal valor,
+            @NotBlank @Size(max = 140) String chave,
+            @NotBlank @Size(max = 120) String nomeEsperado,
+            @NotBlank @Size(max = 120) String nomeRecebedor,
+            boolean novoDestinatario,
+            boolean dispositivoConfiavel,
+            boolean valorForaDoPerfil,
+            @Size(max = 2000) String mensagemSuspeita) {}
+
+    public record SinalRisco(String codigo, String origem, int pontos, String explicacao) {}
+
+    public record PreflightPixResponse(String tentativaId, Risco risco, int pontuacao,
+                                       DecisaoPreflight decisao, boolean transferenciaExecutada,
+                                       List<SinalRisco> sinais, List<String> recomendacoes,
+                                       Instant criadaEm, String aviso) {}
+
+    public record CenarioDemo(String id, String nome, String descricao, PreflightPixRequest solicitacao) {}
+
+    public enum DecisaoPreflight {
+        SEGUIR_COM_CAUTELA,
+        PAUSAR_E_CONFIRMAR,
+        NAO_CONFIRMAR_E_PEDIR_AJUDA
+    }
 }

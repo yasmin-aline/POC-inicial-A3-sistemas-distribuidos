@@ -7,5 +7,7 @@ public interface DenunciaRepository extends JpaRepository<Denuncia, Long> {
 
     long countByChaveHash(String chaveHash);
 
+    boolean existsByChaveHashAndDescricao(String chaveHash, String descricao);
+
     Optional<Denuncia> findFirstByChaveHashOrderByCriadaEmDesc(String chaveHash);
 }

@@ -19,11 +19,13 @@ class IaForaDoArTest {
     MockMvc mvc;
 
     @Test
-    void iaForaDoArLevaParaConsultaDeChave() throws Exception {
+    void geminiForaDoArUsaRegrasLocaisEContinuaOrientando() throws Exception {
         mvc.perform(post("/api/mensagens/analise").contentType(MediaType.APPLICATION_JSON)
-                        .content("{\"texto\":\"Oi, mudei de número, me faz um Pix?\"}"))
+                        .content("{\"texto\":\"Oi, mudei de número, me faz um Pix urgente?\"}"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.iaDisponivel").value(false))
-                .andExpect(jsonPath("$.proximoPasso").value("CONSULTAR_CHAVE"));
+                .andExpect(jsonPath("$.motor").value("REGRAS"))
+                .andExpect(jsonPath("$.risco").value("ALTO"))
+                .andExpect(jsonPath("$.proximoPasso").value("NAO_PAGAR_E_CONFIRMAR_POR_OUTRO_CANAL"));
     }
 }

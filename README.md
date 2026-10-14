@@ -1,72 +1,61 @@
-# Pix Seguro (PoC)
+# Pix Seguro — Sentinela Pix (PoC)
 
-API em Java 21 + Spring Boot 3 que implementa o fluxograma do Pix Seguro: antes de pagar um Pix, a pessoa consulta a chave, cola a mensagem recebida ou responde um autodiagnóstico, recebe um risco e é guiada até pagar, confirmar por outro canal ou denunciar.
+API Java 17 + Spring Boot que simula uma pré-análise de uma tentativa Pix **antes de uma confirmação fictícia**. Cruza dados sintéticos do simulador, relatos locais por hash e sinais de uma mensagem opcional. Retorna uma decisão explicável e registra o resultado.
 
-## Rodar local
+> É uma simulação. Não inicia, intercepta, autoriza ou bloqueia transferências reais. Não se conecta ao Bradesco, ao Banco Central, ao DICT nem a titulares de chaves. Use somente dados fictícios.
+
+## Executar localmente
 
 ```bash
 mvn spring-boot:run
 ```
 
-- Swagger (para testar sem front): http://localhost:8080/swagger-ui.html
-- Saúde: http://localhost:8080/actuator/health
-- Banco H2 em memória, os dados somem ao reiniciar. Sobe com 2 chaves de exemplo: `golpista@exemplo.com` (3 denúncias) e `suspeito@exemplo.com` (1).
+- Swagger UI: `http://localhost:8080/swagger-ui.html`
+- Cenários sintéticos: `GET /api/sandbox/pix/cenarios`
+- Pré-análise: `POST /api/sandbox/pix/preflight`
+- Consulta do registro: `GET /api/sandbox/pix/tentativas/{id}`
+- Saúde: `GET /actuator/health`
 
-## Fluxograma para endpoints
+A raiz de testes é H2 em memória. Flyway aplica migrations versionadas; o Hibernate só valida o schema. Os exemplos de denúncia são seedados de forma idempotente, por padrão (`PIXSEGURO_SEED_DEMO=true`).
 
-| Nó do fluxograma | Endpoint |
-|---|---|
-| Tenho a chave, "Vê quantas denúncias a chave já tem" | `POST /api/chaves/consulta` |
-| Recebi uma mensagem, "IA analisa e mostra risco" | `POST /api/mensagens/analise` |
-| IA fora do ar, vai para digitar a chave | resposta com `iaDisponivel=false` e `proximoPasso=CONSULTAR_CHAVE` |
-| Não sei bem, 5 perguntas | `GET /api/autodiagnostico/perguntas` e `POST /api/autodiagnostico` |
-| Qual o risco? e Em golpe? | `POST /api/decisao` |
-| Já sei que é golpe, Denuncia a chave, Já tinha feito o Pix? | `POST /api/denuncias` |
-| Pede devolução pelo MED e registra B.O. | `proximoPasso=PEDIR_DEVOLUCAO_MED_E_REGISTRAR_BO` na denúncia |
-| Próximos usuários veem o alerta | a denúncia aumenta o total retornado em `/api/chaves/consulta` |
+## Fluxo principal
 
-Toda resposta traz `proximoPasso`, que diz ao cliente qual nó do fluxograma vem a seguir.
+`tentativa sintética` → validação pelo controller → `PixPreflightService` cruza sinais transacionais simulados, relatos locais e, se houver texto, análise Gemini/regras → classifica risco e recomenda ação → persiste hash, pontuação, decisão e snapshot dos sinais → devolve resposta com `transferenciaExecutada=false`.
 
-## Exemplos
+Códigos da decisão:
+
+- `SEGUIR_COM_CAUTELA`
+- `PAUSAR_E_CONFIRMAR`
+- `NAO_CONFIRMAR_E_PEDIR_AJUDA`
+
+Os pesos são heurísticas demonstrativas, não probabilidades calibradas. Consulte [GUIA-CODIGO-E-SWAGGER.md](GUIA-CODIGO-E-SWAGGER.md) para o mapa completo dos componentes e cenários passo a passo no Swagger.
+
+## Persistência e migrations
+
+- `V1__cria_tabela_denuncia.sql`
+- `V2__cria_tabela_pix_tentativa.sql`
+- `V3__cria_cenarios_demo.sql`
+
+H2 em memória é o padrão. PostgreSQL também é suportado pelas dependências. Para outra base, configure `SPRING_DATASOURCE_URL`, `SPRING_DATASOURCE_USERNAME` e `SPRING_DATASOURCE_PASSWORD`. Um deploy padrão no Render não cria banco persistente por si só; configure PostgreSQL se os registros precisarem sobreviver a reinícios.
+
+## Gemini e fallback
+
+- Sem `GEMINI_API_KEY`, a mensagem é analisada pelo motor local de regras.
+- Com a chave, o servidor chama Gemini; não coloque segredo no cliente/front-end.
+- Modelo configurável por `GEMINI_MODEL` (padrão `gemini-2.5-flash`).
+- Se o Gemini falhar, o motor local continua a análise.
+- `PIXSEGURO_IA_OFFLINE=true` simula indisponibilidade remota.
+
+## Testes
 
 ```bash
-# consultar chave
-curl -s localhost:8080/api/chaves/consulta -H 'Content-Type: application/json' \
-  -d '{"chave":"golpista@exemplo.com"}'
-
-# analisar mensagem
-curl -s localhost:8080/api/mensagens/analise -H 'Content-Type: application/json' \
-  -d '{"texto":"Oi mãe, mudei de número, me faz um Pix urgente?"}'
-
-# autodiagnóstico (5 respostas, true = sim)
-curl -s localhost:8080/api/autodiagnostico -H 'Content-Type: application/json' \
-  -d '{"respostas":[true,true,false,false,false]}'
-
-# decisão depois de confirmar por outro canal (E_GOLPE, NAO_DEU_PARA_CONFIRMAR, NAO_E_GOLPE)
-curl -s localhost:8080/api/decisao -H 'Content-Type: application/json' \
-  -d '{"risco":"ALTO","confirmacao":"NAO_DEU_PARA_CONFIRMAR"}'
-
-# denunciar (jaFezPix=true devolve as orientações de MED e B.O.)
-curl -s localhost:8080/api/denuncias -H 'Content-Type: application/json' \
-  -d '{"chave":"novo@golpe.com","descricao":"Falso parente","jaFezPix":true}'
+mvn clean test
 ```
 
-## Análise de mensagem: IA ou regras
+## Rotas preservadas do fluxo original
 
-- Sem `ANTHROPIC_API_KEY`: usa o motor de regras local (`motor: "REGRAS"`), que funciona offline.
-- Com `ANTHROPIC_API_KEY`: usa a IA (`motor: "IA"`). Modelo configurável em `ANTHROPIC_MODEL`.
-- Se a IA falhar, ou com `PIXSEGURO_IA_OFFLINE=true`, a resposta cai no ramo "IA fora do ar".
+`POST /api/chaves/consulta`, `POST /api/mensagens/analise`, `GET /api/autodiagnostico/perguntas`, `POST /api/autodiagnostico`, `POST /api/decisao` e `POST /api/denuncias` continuam disponíveis para os outros ramos do fluxograma.
 
-## Deploy no Render
+## Limites
 
-1. Suba o projeto para um repositório no GitHub.
-2. No Render: New, Blueprint (ele lê o `render.yaml`) ou New, Web Service com Runtime Docker.
-3. Opcional: defina `ANTHROPIC_API_KEY` nas variáveis de ambiente.
-4. No plano free o serviço hiberna após inatividade (primeira chamada demora) e o H2 em memória zera a cada reinício.
-
-## Limitações conhecidas da PoC
-
-- Sem autenticação nem limite de requisições: qualquer pessoa pode denunciar qualquer chave, então denúncias falsas podem difamar uma chave legítima.
-- Chaves são guardadas apenas como hash SHA-256 (nada de chave em texto puro).
-- Telefone digitado com e sem DDI (+55) gera hashes diferentes.
-- Dados em memória. Para persistir, troque o H2 por Postgres.
+A reputação é local e baseada em relatos não verificados. A API de demonstração não tem autenticação, rate limiting nem moderação de denúncias; não a use para coletar relatos reais. H2 é volátil, SHA-256 simples não é segredo, e nenhum dado de tentativa deve ser interpretado como evidência bancária oficial.
