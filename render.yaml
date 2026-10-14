@@ -1,0 +1,11 @@
+services:
+  - type: web
+    name: pix-seguro
+    runtime: docker
+    plan: free
+    healthCheckPath: /actuator/health
+    envVars:
+      - key: ANTHROPIC_API_KEY
+        sync: false
+      - key: PIXSEGURO_IA_OFFLINE
+        value: "false"
